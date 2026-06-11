@@ -1,0 +1,14 @@
+{
+  "login": {
+    "email": "ruth@example.com",
+    "submitted_code": "111111",
+    "now": "2026-06-11T10:05:00+00:00",
+    "stored_code": {
+      "code_hash": "aa2e360ea25b9e678b912d41780bcea19af7ce537e7b70a24dfd0de1f6c7103c",
+      "expires_at": "2026-06-11T10:15:00+00:00",
+      "attempts": 1,
+      "consumed": false,
+      "created_at": "2026-06-11T10:00:00+00:00"
+    }
+  }
+}

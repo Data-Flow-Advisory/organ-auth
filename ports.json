@@ -1,0 +1,21 @@
+{
+  "_README": "Typed port manifest per the Connection Standard (CONNECTORS.md). The composer wires two ports iff their `type` matches a name in the shared vocabulary (types.json). `name` is the literal wiring address: an input is read under state[name]; an output is written under output[name].",
+  "organ": "organ-auth",
+  "inputs": [
+    {
+      "name": "login",
+      "type": "LoginAttempt",
+      "required": true,
+      "desc": "Submitted email + plaintext code + the orchestrator-fetched outstanding stored code record + now."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "session",
+      "type": "Session",
+      "desc": "Issued authenticated session descriptor on accept; null on reject."
+    }
+  ],
+  "_proposed_types": ["LoginAttempt", "Session"],
+  "_proposed_types_note": "LoginAttempt and Session are not yet in the orchestrator's types.json. Their proposed schemas are in types-proposed.json in this repo and described in the PR body for vocabulary review (CONNECTORS.md: new types are reviewed, not minted freely)."
+}

@@ -1,0 +1,29 @@
+{
+  "_README": "PROPOSED additions to the orchestrator's shared connection-type vocabulary (types.json). organ-auth introduces an authentication seam that no existing type covers. Per CONNECTORS.md new types are reviewed, not minted freely — these two are submitted for review in the organ-auth PR. Merge them into orchestrator/types.json (feat/drift-gate) under `types` if approved.",
+  "version": 1,
+  "types": {
+    "LoginAttempt": {
+      "desc": "A submitted login credential to verify against an outstanding one-time code: the email it was sent to, the plaintext code the user entered, the orchestrator-fetched stored code record (null if none on file), and the clock. The impure DB fetch + code generation/email happen at the orchestrator edge; the organ judges the snapshot.",
+      "schema": {
+        "email": "str",
+        "submitted_code": "str",
+        "now": "str",
+        "stored_code": "object|null<{code_hash:str,expires_at:str,attempts:int,consumed:bool,created_at:str}>"
+      },
+      "produced_by_eg": ["the-login-form", "organ-auth (request edge)"],
+      "consumed_by_eg": ["organ-auth"]
+    },
+    "Session": {
+      "desc": "An issued authenticated session descriptor produced by a successful login: who it is for, when it was issued, when it expires, how it was obtained, and that it is authenticated. The orchestrator mints the actual signed cookie from this descriptor.",
+      "schema": {
+        "email": "str",
+        "authenticated": "bool",
+        "issued_at": "str",
+        "expires_at": "str",
+        "source": "magic_link|persona|sso"
+      },
+      "produced_by_eg": ["organ-auth"],
+      "consumed_by_eg": ["organ-admin-gate", "organ-storage-adapter"]
+    }
+  }
+}

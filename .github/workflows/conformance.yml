@@ -1,0 +1,163 @@
+name: Conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Check pure organ contract (signature)
+        run: |
+          python -c "
+          from organ import decide
+          import inspect
+          params = list(inspect.signature(decide).parameters.keys())
+          assert params == ['state', 'context'], f'Expected (state, context), got {params}'
+          print('OK decide(state, context) signature correct')
+          "
+
+      - name: Test empty state (fail-safe → reject)
+        run: |
+          python -c "
+          from organ import decide
+          r = decide({}, {})
+          assert 'output' in r and 'rationale' in r and 'self_metric' in r
+          conf = r['self_metric']['confidence']
+          assert 0.0 <= conf <= 1.0, f'Confidence {conf} out of range'
+          assert r['output']['decision'] == 'reject', 'empty state must reject (conservative)'
+          assert r['output']['session'] is None
+          print(f'OK empty state rejects (confidence: {conf})')
+          "
+
+      - name: Test with sample states
+        run: |
+          python -c "
+          from organ import decide
+          import json
+          from pathlib import Path
+          ctx = {'secret_salt': 'test-secret-key', 'max_attempts': 5, 'session_ttl_minutes': 60}
+          expect = {
+              'accept.json': 'accept',
+              'reject_wrong_code.json': 'reject',
+              'reject_expired.json': 'reject',
+              'reject_no_code.json': 'reject',
+              'reject_locked_attempts.json': 'reject',
+          }
+          for fname, want in expect.items():
+              with open(Path('samples') / fname) as f:
+                  state = json.load(f)
+              r = decide(state, ctx)
+              out = r['output']
+              assert out['decision'] == want, f'{fname}: expected {want}, got {out[\"decision\"]}'
+              assert 0.0 <= r['self_metric']['confidence'] <= 1.0
+              if want == 'accept':
+                  assert out['session'] is not None and out['session']['authenticated'] is True
+              else:
+                  assert out['session'] is None
+              print(f'OK {fname}: {out[\"decision\"]} (confidence: {r[\"self_metric\"][\"confidence\"]})')
+          "
+
+      - name: Verify via ORGAN_INPUT file path (CONTRACT entrypoint)
+        run: |
+          printf '%s' '{"state": {"login": {"email": "ruth@example.com", "submitted_code": "482913", "now": "2026-06-11T10:05:00+00:00", "stored_code": {"code_hash": "aa2e360ea25b9e678b912d41780bcea19af7ce537e7b70a24dfd0de1f6c7103c", "expires_at": "2026-06-11T10:15:00+00:00", "attempts": 0, "consumed": false}}}, "context": {"secret_salt": "test-secret-key", "session_ttl_minutes": 60}}' > /tmp/envelope.json
+          ORGAN_INPUT=/tmp/envelope.json python organ.py > /tmp/out.json
+          python -c "
+          import json
+          r = json.load(open('/tmp/out.json'))
+          assert r['output']['decision'] == 'accept', r['output']
+          assert r['output']['session']['email'] == 'ruth@example.com'
+          print('OK ORGAN_INPUT file-path entrypoint emitted a valid accept')
+          "
+
+      - name: Validate ports.json against the shared vocabulary
+        run: |
+          python -c "
+          import json
+          ports = json.load(open('ports.json'))
+          assert ports['inputs'][0]['name'] == 'login' and ports['inputs'][0]['type'] == 'LoginAttempt'
+          assert ports['outputs'][0]['name'] == 'session' and ports['outputs'][0]['type'] == 'Session'
+          # LoginAttempt + Session are proposed additions — pinned in types-proposed.json.
+          proposed = json.load(open('types-proposed.json'))['types']
+          assert 'LoginAttempt' in proposed and 'Session' in proposed
+          print('OK ports manifest declares login:LoginAttempt -> session:Session; types proposed')
+          "
+
+      - name: Run unit tests
+        run: python -m pytest test_organ.py -v --tb=short
+
+      - name: Check determinism
+        run: |
+          python -c "
+          from organ import decide
+          state = {'login': {'email': 'a@b.com', 'submitted_code': '482913', 'now': '2026-06-11T10:05:00+00:00', 'stored_code': {'code_hash': 'aa2e360ea25b9e678b912d41780bcea19af7ce537e7b70a24dfd0de1f6c7103c', 'expires_at': '2026-06-11T10:15:00+00:00', 'attempts': 0, 'consumed': False}}}
+          ctx = {'secret_salt': 'test-secret-key'}
+          assert decide(state, ctx) == decide(state, ctx), 'Organ is not deterministic'
+          print('OK organ is deterministic (same input -> same output)')
+          "
+
+      - name: Check no side effects (state not mutated)
+        run: |
+          python -c "
+          from organ import decide
+          import copy
+          state = {'login': {'email': 'a@b.com', 'submitted_code': '482913', 'now': '2026-06-11T10:05:00+00:00', 'stored_code': {'code_hash': 'x', 'expires_at': '2026-06-11T10:15:00+00:00', 'attempts': 0, 'consumed': False}}}
+          snapshot = copy.deepcopy(state)
+          decide(state, {'secret_salt': 's'})
+          assert state == snapshot, 'Organ mutated its input state'
+          print('OK no side effects on input state')
+          "
+
+      - name: Check no external dependencies (stdlib-only)
+        run: |
+          python -c "
+          import ast
+          tree = ast.parse(open('organ.py').read())
+          imports = []
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imports += [a.name.split('.')[0] for a in node.names]
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imports.append(node.module.split('.')[0])
+          stdlib_allowed = {'hashlib', 'hmac', 'json', 'sys', 'os', 'datetime', 'typing'}
+          external = [i for i in imports if i and i not in stdlib_allowed]
+          assert not external, f'Non-stdlib imports found: {external}'
+          print(f'OK pure organ: stdlib-only (imports: {sorted(set(imports))})')
+          "
+
+      - name: Summary
+        run: |
+          python -c "
+          from organ import decide
+          state = {'login': {'email': 'ruth@example.com', 'submitted_code': '482913', 'now': '2026-06-11T10:05:00+00:00', 'stored_code': {'code_hash': 'aa2e360ea25b9e678b912d41780bcea19af7ce537e7b70a24dfd0de1f6c7103c', 'expires_at': '2026-06-11T10:15:00+00:00', 'attempts': 0, 'consumed': False}}}
+          r = decide(state, {'secret_salt': 'test-secret-key', 'session_ttl_minutes': 60})
+          print('=' * 50)
+          print('ORGAN CONFORMANCE VERIFIED')
+          print('=' * 50)
+          print('Return shape       : OK')
+          print('Pure function      : OK')
+          print('Deterministic      : OK')
+          print('Fail-safe (reject) : OK')
+          print('Stdlib-only        : OK')
+          print('Typed ports        : login:LoginAttempt -> session:Session')
+          print(f'Decision   : {r[\"output\"][\"decision\"]}')
+          print(f'Confidence : {r[\"self_metric\"][\"confidence\"]:.1%}')
+          print('=' * 50)
+          "
