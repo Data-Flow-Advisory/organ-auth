@@ -17,5 +17,14 @@
     }
   ],
   "_proposed_types": ["LoginAttempt", "Session"],
-  "_proposed_types_note": "LoginAttempt and Session are not yet in the orchestrator's types.json. Their proposed schemas are in types-proposed.json in this repo and described in the PR body for vocabulary review (CONNECTORS.md: new types are reviewed, not minted freely)."
+  "_proposed_types_note": "LoginAttempt and Session are not yet in the orchestrator's types.json. Their proposed schemas are in types-proposed.json in this repo and described in the PR body for vocabulary review (CONNECTORS.md: new types are reviewed, not minted freely).",
+  "_checked": {
+    "corpus_checked": "2026-06-11",
+    "oss_checked": "2026-06-11",
+    "corpus_verdict": "keep",
+    "corpus_rationale": "Not a duplicate. organ-auth is the sole organ validating a first-party stored emailed one-time login code -> issuing a Session. The other auth-named organs cover fundamentally different mechanisms: organ-ms-auth routes the Microsoft OAuth 2.0 authorization-code flow (build_auth_url/exchange_code/refresh_token) for MS Graph/Teams; organ-gmail-credentials-credentials and organ-gmail-inbox-auth route Gmail OAuth credential freshness/token-refresh. None verify a one-time login code. The split mirrors discovery-engine's own services: email_auth.py (this organ's source) vs ms_auth.py / gmail_credentials.",
+    "oss_verdict": "keep",
+    "oss_rationale": "No permissive-OSS adopt-candidate. The leading permissive lib, PyOTP (MIT), implements RFC-4226 HOTP / RFC-6238 TOTP — time/counter-derived authenticator-app codes, a DIFFERENT mechanism from this organ's stored-random emailed code; adopting it would change product behaviour, not cut maintenance. Full OSS auth frameworks (Authlib, SuperTokens, Ory Kratos, Keycloak, Authentik, Flask-Login, LinOTP) are stateful, side-effecting systems that own exactly the impure edges (DB rows, sessions, SMTP, signed cookies) this pure decider deliberately excludes — adopting one inverts the organ architecture. The verification itself is ~30 lines of stdlib hmac.compare_digest over a salted hashlib hash plus expiry/single-use/attempt-budget checks (already best-practice, fail-safe reject); the stdlib is the correct dependency.",
+    "checked_by": "fleet-worker item-19904"
+  }
 }
